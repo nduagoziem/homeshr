@@ -10,7 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/nduagoziem/homeshr/services/user/internal/cache"
 	"github.com/nduagoziem/homeshr/services/user/internal/db"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -18,6 +20,7 @@ var (
 	ErrUserAlreadyExists  = errors.New("user already exists")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrQueriesRequired    = errors.New("auth service requires db queries")
+	ErrInvalidOTP         = errors.New("invalid or expired verification code")
 )
 
 const defaultRefreshTokenTTL = 30 * 24 * time.Hour
@@ -25,49 +28,117 @@ const defaultRefreshTokenTTL = 30 * 24 * time.Hour
 // AuthService provides authentication functionality for the user micro-service.
 type AuthService struct {
 	queries        *db.Queries
+	redis          *cache.Cache
 	accessTokenTTL time.Duration
 	jwtSecret      []byte
+	resendAPIKey   string
+	otpSender      string // homeshr mail address OTPs are sent from
+}
+
+// AuthServiceConfig carries the dependencies and settings required by AuthService.
+type AuthServiceConfig struct {
+	Queries        *db.Queries
+	Redis          *cache.Cache
+	AccessTokenTTL time.Duration
+	JWTSecret      string
+	ResendAPIKey   string
+	OTPSender      string
 }
 
 // NewAuthService creates a new authentication service.
-func NewAuthService(queries *db.Queries, accessTokenTTL time.Duration, jwtSecret string) *AuthService {
+func NewAuthService(cfg AuthServiceConfig) *AuthService {
 	return &AuthService{
-		queries:        queries,
-		accessTokenTTL: accessTokenTTL,
-		jwtSecret:      []byte(jwtSecret),
+		queries:        cfg.Queries,
+		redis:          cfg.Redis,
+		accessTokenTTL: cfg.AccessTokenTTL,
+		jwtSecret:      []byte(cfg.JWTSecret),
+		resendAPIKey:   cfg.ResendAPIKey,
+		otpSender:      cfg.OTPSender,
 	}
 }
 
-// Register creates a new user with the provided credentials.
-func (s *AuthService) Register(ctx context.Context, email, fullName, password string) (db.CreateUserRow, error) {
+// SendRegistrationOTP verifies that the email is not already taken and emails a
+// one-time verification code to it. This is the first step of registration: the
+// user must supply the returned code back to Register to prove ownership of the
+// email before an account is created.
+func (s *AuthService) SendRegistrationOTP(ctx context.Context, email string) error {
+	if s.queries == nil {
+		return ErrQueriesRequired
+	}
+
+	// Reject if a user already owns this email.
+	_, err := s.queries.FindUserByEmail(ctx, email)
+	if err == nil {
+		return ErrUserAlreadyExists
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	return sendOTP(sendOTPParams{
+		ctx:      ctx,
+		redis:    *s.redis,
+		apiKey:   s.resendAPIKey,
+		sender:   s.otpSender,
+		receiver: email,
+	})
+}
+
+// Register creates a new user with the provided credentials and logs in immediately.
+//
+// The code is the OTP previously emailed by SendRegistrationOTP; it must be valid
+// for the given email or the account is not created.
+func (s *AuthService) Register(ctx context.Context, email, fullName, password, code string) (LoginResponse, error) {
 
 	//Check if the queries are set
 	if s.queries == nil {
-		return db.CreateUserRow{}, ErrQueriesRequired
+		return LoginResponse{}, ErrQueriesRequired
 	}
 
 	// Check if user exists
 	_, err := s.queries.FindUserByEmail(ctx, email)
 	if err == nil {
-		return db.CreateUserRow{}, ErrUserAlreadyExists
+		return LoginResponse{}, ErrUserAlreadyExists
 	}
 
 	// Only proceed if the error was "user not found"
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return db.CreateUserRow{}, err
+		return LoginResponse{}, err
+	}
+
+	// Verify the OTP proves the user owns this email before creating the account.
+	valid, err := validateOTP(ctx, code, email, *s.redis)
+	if err != nil {
+		// A missing key means the code was never sent or has expired.
+		if errors.Is(err, redis.Nil) {
+			return LoginResponse{}, ErrInvalidOTP
+		}
+		return LoginResponse{}, err
+	}
+	if !valid {
+		return LoginResponse{}, ErrInvalidOTP
 	}
 
 	// Hash the user's password
 	pass, err := hashPassword(password)
 	if err != nil {
-		return db.CreateUserRow{}, err
+		return LoginResponse{}, err
 	}
 
-	return s.queries.CreateUser(ctx, db.CreateUserParams{
+	user, err := s.queries.CreateUser(ctx, db.CreateUserParams{
 		ID:           pgtype.UUID{Bytes: uuid.New(), Valid: true},
 		Email:        email,
 		PasswordHash: pass,
 		FullName:     pgtype.Text{String: fullName, Valid: fullName != ""},
+	})
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	return s.issueTokens(ctx, LoginUser{
+		ID:       user.ID,
+		Email:    user.Email,
+		FullName: user.FullName,
 	})
 }
 
@@ -102,42 +173,11 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (LoginR
 		return LoginResponse{}, ErrInvalidCredentials
 	}
 
-	accessToken, err := s.generateAccessToken(user)
-	if err != nil {
-		return LoginResponse{}, err
-	}
-
-	// Generate a refresh token and store it in the database
-	now := time.Now()
-	refreshToken := uuid.NewString()
-	_, err = s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
-		UserID:    user.ID,
-		Token:     refreshToken,
-		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
-		ExpiresAt: pgtype.Timestamptz{Time: now.Add(defaultRefreshTokenTTL), Valid: true},
-		Revoked:   false,
+	return s.issueTokens(ctx, LoginUser{
+		ID:       user.ID,
+		Email:    user.Email,
+		FullName: user.FullName,
 	})
-	if err != nil {
-		return LoginResponse{}, err
-	}
-
-	// User logged in, update the timestamp/status of last login
-	if err := s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
-		LastLogin: pgtype.Timestamptz{Time: now, Valid: true},
-		ID:        user.ID,
-	}); err != nil {
-		return LoginResponse{}, err
-	}
-
-	return LoginResponse{
-		User: LoginUser{
-			ID:       user.ID,
-			Email:    user.Email,
-			FullName: user.FullName,
-		},
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-	}, nil
 }
 
 func hashPassword(password string) (string, error) {
@@ -154,7 +194,7 @@ func verifyPassword(hashedPass, password string) error {
 }
 
 // generateAccessToken creates a new JWT access token
-func (s *AuthService) generateAccessToken(user db.FindUserByEmailRow) (string, error) {
+func (s *AuthService) generateAccessToken(user LoginUser) (string, error) {
 	// Set the expiration time
 	now := time.Now().UTC()
 	expirationTime := now.Add(s.accessTokenTTL)
@@ -179,7 +219,40 @@ func (s *AuthService) generateAccessToken(user db.FindUserByEmailRow) (string, e
 	return tokenString, nil
 }
 
-// AuthenticateWithTOTP uses a password-less/TOTP style for authentication.
+func (s *AuthService) issueTokens(ctx context.Context, user LoginUser) (LoginResponse, error) {
+	accessToken, err := s.generateAccessToken(user)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	now := time.Now().UTC()
+	refreshToken := uuid.NewString()
+	_, err = s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+		UserID:    user.ID,
+		Token:     refreshToken,
+		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		ExpiresAt: pgtype.Timestamptz{Time: now.Add(defaultRefreshTokenTTL), Valid: true},
+		Revoked:   false,
+	})
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	if err := s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
+		LastLogin: pgtype.Timestamptz{Time: now, Valid: true},
+		ID:        user.ID,
+	}); err != nil {
+		return LoginResponse{}, err
+	}
+
+	return LoginResponse{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+// AuthenticateWithTOTP uses a password-less/TOTP style of authentication.
 //
 // The user provides an email and a Time based One Time Password (TOTP) is sent to the email.
 // If the TOTP is valid and email exists, the user is logged in, else a new user is created.

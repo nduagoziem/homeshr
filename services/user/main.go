@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
@@ -13,7 +15,7 @@ import (
 
 func main() {
 
-	_ = godotenv.Load("/home/nduagoziem/dev/homeshr/services/user/.env")
+	_ = loadServiceEnv()
 	databaseURL := os.Getenv("DATABASE_URL")
 
 	ctx := context.Background()
@@ -33,4 +35,15 @@ func main() {
 	if err := e.Start(":1323"); err != nil {
 		e.Logger.Error("failed to start server", "error", err)
 	}
+}
+
+// loadServiceEnv loads the .env file in user service.
+func loadServiceEnv() error {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return godotenv.Load(".env", filepath.Join("services", "user", ".env"))
+	}
+
+	serviceEnv := filepath.Join(filepath.Dir(file), ".env")
+	return godotenv.Load(".env", filepath.Join("services", "user", ".env"), serviceEnv)
 }
