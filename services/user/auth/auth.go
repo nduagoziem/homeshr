@@ -21,6 +21,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrQueriesRequired    = errors.New("auth service requires db queries")
 	ErrInvalidOTP         = errors.New("invalid or expired verification code")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 const defaultRefreshTokenTTL = 30 * 24 * time.Hour
@@ -142,6 +143,7 @@ func (s *AuthService) Register(ctx context.Context, email, fullName, password, c
 	})
 }
 
+// LoginResponse represents the response returned after a successful login or registration.
 type LoginResponse struct {
 	User         LoginUser `json:"user"`
 	AccessToken  string    `json:"access_token"`
@@ -178,6 +180,30 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (LoginR
 		Email:    user.Email,
 		FullName: user.FullName,
 	})
+}
+
+// GetProfile returns the profile of the user identified by email.
+//
+// It backs the protected profile endpoint: Envoy validates the caller's JWT and
+// forwards the verified identity, and this looks up the corresponding record.
+func (s *AuthService) GetProfile(ctx context.Context, email string) (LoginUser, error) {
+	if s.queries == nil {
+		return LoginUser{}, ErrQueriesRequired
+	}
+
+	user, err := s.queries.FindUserByEmail(ctx, email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoginUser{}, ErrUserNotFound
+	}
+	if err != nil {
+		return LoginUser{}, err
+	}
+
+	return LoginUser{
+		ID:       user.ID,
+		Email:    user.Email,
+		FullName: user.FullName,
+	}, nil
 }
 
 func hashPassword(password string) (string, error) {

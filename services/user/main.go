@@ -2,39 +2,80 @@ package main
 
 import (
 	"context"
-	"net/http"
+	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+
+	"github.com/nduagoziem/homeshr/services/user/auth"
+	"github.com/nduagoziem/homeshr/services/user/internal/cache"
 	"github.com/nduagoziem/homeshr/services/user/internal/db"
+	"github.com/nduagoziem/homeshr/services/user/internal/grpcserver"
+	authpb "github.com/nduagoziem/homeshr/services/user/proto"
+)
+
+const (
+	defaultGRPCPort       = ":50051"
+	defaultAccessTokenTTL = 15 * time.Minute
 )
 
 func main() {
-
 	_ = loadServiceEnv()
-	databaseURL := os.Getenv("DATABASE_URL")
 
 	ctx := context.Background()
 
-	db.NewPostgresPool(ctx, databaseURL)
+	queries := db.NewPostgresPool(ctx, os.Getenv("DATABASE_URL"))
+	redis := cache.NewRedisCache(ctx, os.Getenv("REDIS_URL"))
 
-	e := echo.New()
-
-	e.Use(middleware.RequestLogger())
-	e.Use(middleware.Recover())
-
-	e.GET("/", func(c *echo.Context) error {
-
-		return c.JSON(http.StatusOK, map[string]string{"message": "Hello World, from Homeshr❤!"})
+	authService := auth.NewAuthService(auth.AuthServiceConfig{
+		Queries:        queries,
+		Redis:          redis,
+		AccessTokenTTL: accessTokenTTL(),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		ResendAPIKey:   os.Getenv("RESEND_API_KEY"),
+		OTPSender:      os.Getenv("OTP_SENDER"),
 	})
 
-	if err := e.Start(":1323"); err != nil {
-		e.Logger.Error("failed to start server", "error", err)
+	gRPCPort := os.Getenv("GRPC_PORT")
+	if gRPCPort == "" {
+		gRPCPort = defaultGRPCPort
 	}
+
+	lis, err := net.Listen("tcp", gRPCPort)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", gRPCPort, err)
+	}
+
+	grpcServer := grpc.NewServer()
+	authpb.RegisterAuthserviceServer(grpcServer, grpcserver.New(authService))
+	// Reflection lets tools like grpcurl introspect the service during development.
+	reflection.Register(grpcServer)
+
+	log.Printf("gRPC auth server listening on %s", gRPCPort)
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("gRPC server stopped: %v", err)
+	}
+}
+
+// accessTokenTTL reads ACCESS_TOKEN_TTL (a Go duration string, e.g. "15m") and
+// falls back to defaultAccessTokenTTL when unset or invalid.
+func accessTokenTTL() time.Duration {
+	raw := os.Getenv("ACCESS_TOKEN_TTL")
+	if raw == "" {
+		return defaultAccessTokenTTL
+	}
+	ttl, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("invalid ACCESS_TOKEN_TTL %q, using default %s", raw, defaultAccessTokenTTL)
+		return defaultAccessTokenTTL
+	}
+	return ttl
 }
 
 // loadServiceEnv loads the .env file in user service.

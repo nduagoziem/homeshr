@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package user;
+option go_package = "github.com/nduagoziem/homeshr/services/user/proto;authpb";
+
+import "google/api/annotations.proto";
+
+service Authservice {
+  // Public: emails a one-time verification code for registration.
+  rpc SendRegistrationOTP(SendRegistrationOTPRequest) returns (SendRegistrationOTPResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/register/otp"
+      body: "*"
+    };
+  }
+
+  // Public: creates a user (verifying the OTP) and logs them in.
+  rpc Register(RegisterRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/register"
+      body: "*"
+    };
+  }
+
+  // Public: authenticates and returns access + refresh tokens.
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  // Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
+  // which forwards the verified identity as x-user-id / x-user-email).
+  rpc GetProfile(GetProfileRequest) returns (UserProfile) {
+    option (google.api.http) = {
+      get: "/v1/user/profile"
+    };
+  }
+}
+
+message SendRegistrationOTPRequest {
+  string email = 1;
+}
+
+message SendRegistrationOTPResponse {
+  string message = 1;
+}
+
+message RegisterRequest {
+  string email = 1;
+  string full_name = 2;
+  string password = 3;
+  string code = 4;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+}
+
+message LoginResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+}
+
+message GetProfileRequest {}
+
+message UserProfile {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+}

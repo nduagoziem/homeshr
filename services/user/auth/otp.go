@@ -20,6 +20,7 @@ const (
 var otpValidateOpts = totp.ValidateOpts{
 	Period:    otpPeriod,
 	Skew:      1,
+	Digits:    otp.DigitsSix,
 	Algorithm: otp.AlgorithmSHA256,
 }
 
@@ -55,8 +56,14 @@ func validateOTP(ctx context.Context, code, email string, redis cache.Cache) (bo
 	}
 
 	valid, err := totp.ValidateCustom(code, secret, time.Now().UTC(), otpValidateOpts)
-	if err != nil || !valid {
-		return valid, err
+	if err != nil {
+		// ValidateCustom only errors on malformed passcode input (e.g. wrong
+		// length); for our purposes that is simply an invalid code, not a
+		// system failure — so report it as invalid rather than propagating.
+		return false, nil
+	}
+	if !valid {
+		return false, nil
 	}
 
 	if err := redis.Delete(ctx, cache.OTPCacheKey(email)); err != nil {

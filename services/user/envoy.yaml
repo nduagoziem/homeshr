@@ -1,0 +1,100 @@
+# Envoy bootstrap for the homeshr user service.
+#
+# Flow: client JSON/HTTP  ->  Envoy (jwt_authn -> grpc_json_transcoder)  ->
+#       gRPC auth server (host.docker.internal:50051)  ->  Envoy  ->  JSON/HTTP.
+#
+# The gRPC server runs on the host; this Envoy runs in Docker and reaches it via
+# host.docker.internal. On native Docker (WSL2) that name only resolves when the
+# container is created with the extra host mapping `host.docker.internal:host-gateway`
+# (Portainer: Network tab -> "Hosts file entries"). Host port 32768 maps to the
+# listener on container port 10000. This file and proto/auth.pb must be bind-mounted
+# into /etc/envoy/ (envoy.yaml -> /etc/envoy/envoy.yaml, auth.pb -> /etc/envoy/auth.pb).
+#
+# NOTE: the jwt_authn provider validates HS256 tokens with an inline JWKS "oct"
+# key. Its `k` value is the base64url (no padding) encoding of JWT_SECRET in
+# .env. If you change JWT_SECRET you MUST recompute `k` and update it here:
+#   printf '%s' "$JWT_SECRET" | basenc --base64url | tr -d '='
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+  - name: listener_http
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 10000 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          codec_type: AUTO
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: auth_backend
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route:
+                  cluster: grpc_auth
+                  timeout: 60s
+          http_filters:
+          # 1. Validate the JWT on protected routes and forward the identity.
+          - name: envoy.filters.http.jwt_authn
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+              providers:
+                homeshr_auth:
+                  # No `issuer`: our tokens carry no `iss` claim, so it is not checked.
+                  forward: true
+                  forward_payload_header: x-jwt-payload
+                  claim_to_headers:
+                  - { header_name: x-user-id, claim_name: sub }
+                  - { header_name: x-user-email, claim_name: email }
+                  local_jwks:
+                    inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"bXlfc3VwZXJfc2VjcmV0X2tleV8xMjM0NTY3ODk"}]}'
+              rules:
+              # Public: OTP request, register, login (prefix covers /v1/auth/register/otp too).
+              - match: { prefix: "/v1/auth/" }
+              # Protected: everything under /v1/user/ requires a valid JWT.
+              - match: { prefix: "/v1/user/" }
+                requires: { provider_name: homeshr_auth }
+          # 2. Transcode JSON <-> gRPC using the compiled proto descriptor.
+          - name: envoy.filters.http.grpc_json_transcoder
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
+              proto_descriptor: /etc/envoy/auth.pb
+              services:
+              - user.Authservice
+              convert_grpc_status: true
+              print_options:
+                add_whitespace: true
+                always_print_primitive_fields: true
+                preserve_proto_field_names: true
+          # 3. Route the (now gRPC) request to the upstream cluster.
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+  - name: grpc_auth
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    # The upstream speaks gRPC, so the connection must be HTTP/2.
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    load_assignment:
+      cluster_name: grpc_auth
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: host.docker.internal
+                port_value: 50051
