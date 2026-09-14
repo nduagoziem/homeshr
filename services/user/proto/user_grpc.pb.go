@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v3.19.6
-// source: auth.proto
+// source: user.proto
 
 package authpb
 
@@ -19,16 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Authservice_SendRegistrationOTP_FullMethodName = "/user.Authservice/SendRegistrationOTP"
-	Authservice_Register_FullMethodName            = "/user.Authservice/Register"
-	Authservice_Login_FullMethodName               = "/user.Authservice/Login"
-	Authservice_GetProfile_FullMethodName          = "/user.Authservice/GetProfile"
+	UserService_SendRegistrationOTP_FullMethodName = "/user.UserService/SendRegistrationOTP"
+	UserService_Register_FullMethodName            = "/user.UserService/Register"
+	UserService_Login_FullMethodName               = "/user.UserService/Login"
+	UserService_GetProfile_FullMethodName          = "/user.UserService/GetProfile"
 )
 
-// AuthserviceClient is the client API for Authservice service.
+// UserServiceClient is the client API for UserService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type AuthserviceClient interface {
+type UserServiceClient interface {
 	// Public: emails a one-time verification code for registration.
 	SendRegistrationOTP(ctx context.Context, in *SendRegistrationOTPRequest, opts ...grpc.CallOption) (*SendRegistrationOTPResponse, error)
 	// Public: creates a user (verifying the OTP) and logs them in.
@@ -40,58 +40,58 @@ type AuthserviceClient interface {
 	GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error)
 }
 
-type authserviceClient struct {
+type userServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewAuthserviceClient(cc grpc.ClientConnInterface) AuthserviceClient {
-	return &authserviceClient{cc}
+func NewUserServiceClient(cc grpc.ClientConnInterface) UserServiceClient {
+	return &userServiceClient{cc}
 }
 
-func (c *authserviceClient) SendRegistrationOTP(ctx context.Context, in *SendRegistrationOTPRequest, opts ...grpc.CallOption) (*SendRegistrationOTPResponse, error) {
+func (c *userServiceClient) SendRegistrationOTP(ctx context.Context, in *SendRegistrationOTPRequest, opts ...grpc.CallOption) (*SendRegistrationOTPResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendRegistrationOTPResponse)
-	err := c.cc.Invoke(ctx, Authservice_SendRegistrationOTP_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, UserService_SendRegistrationOTP_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *authserviceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+func (c *userServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LoginResponse)
-	err := c.cc.Invoke(ctx, Authservice_Register_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, UserService_Register_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *authserviceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+func (c *userServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LoginResponse)
-	err := c.cc.Invoke(ctx, Authservice_Login_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, UserService_Login_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *authserviceClient) GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error) {
+func (c *userServiceClient) GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserProfile)
-	err := c.cc.Invoke(ctx, Authservice_GetProfile_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, UserService_GetProfile_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// AuthserviceServer is the server API for Authservice service.
-// All implementations must embed UnimplementedAuthserviceServer
+// UserServiceServer is the server API for UserService service.
+// All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
-type AuthserviceServer interface {
+type UserServiceServer interface {
 	// Public: emails a one-time verification code for registration.
 	SendRegistrationOTP(context.Context, *SendRegistrationOTPRequest) (*SendRegistrationOTPResponse, error)
 	// Public: creates a user (verifying the OTP) and logs them in.
@@ -101,145 +101,145 @@ type AuthserviceServer interface {
 	// Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
 	// which forwards the verified identity as x-user-id / x-user-email).
 	GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error)
-	mustEmbedUnimplementedAuthserviceServer()
+	mustEmbedUnimplementedUserServiceServer()
 }
 
-// UnimplementedAuthserviceServer must be embedded to have
+// UnimplementedUserServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedAuthserviceServer struct{}
+type UnimplementedUserServiceServer struct{}
 
-func (UnimplementedAuthserviceServer) SendRegistrationOTP(context.Context, *SendRegistrationOTPRequest) (*SendRegistrationOTPResponse, error) {
+func (UnimplementedUserServiceServer) SendRegistrationOTP(context.Context, *SendRegistrationOTPRequest) (*SendRegistrationOTPResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendRegistrationOTP not implemented")
 }
-func (UnimplementedAuthserviceServer) Register(context.Context, *RegisterRequest) (*LoginResponse, error) {
+func (UnimplementedUserServiceServer) Register(context.Context, *RegisterRequest) (*LoginResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedAuthserviceServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
+func (UnimplementedUserServiceServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
 }
-func (UnimplementedAuthserviceServer) GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error) {
+func (UnimplementedUserServiceServer) GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProfile not implemented")
 }
-func (UnimplementedAuthserviceServer) mustEmbedUnimplementedAuthserviceServer() {}
-func (UnimplementedAuthserviceServer) testEmbeddedByValue()                     {}
+func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
+func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
 
-// UnsafeAuthserviceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to AuthserviceServer will
+// UnsafeUserServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to UserServiceServer will
 // result in compilation errors.
-type UnsafeAuthserviceServer interface {
-	mustEmbedUnimplementedAuthserviceServer()
+type UnsafeUserServiceServer interface {
+	mustEmbedUnimplementedUserServiceServer()
 }
 
-func RegisterAuthserviceServer(s grpc.ServiceRegistrar, srv AuthserviceServer) {
-	// If the following call panics, it indicates UnimplementedAuthserviceServer was
+func RegisterUserServiceServer(s grpc.ServiceRegistrar, srv UserServiceServer) {
+	// If the following call panics, it indicates UnimplementedUserServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&Authservice_ServiceDesc, srv)
+	s.RegisterService(&UserService_ServiceDesc, srv)
 }
 
-func _Authservice_SendRegistrationOTP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _UserService_SendRegistrationOTP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendRegistrationOTPRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AuthserviceServer).SendRegistrationOTP(ctx, in)
+		return srv.(UserServiceServer).SendRegistrationOTP(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Authservice_SendRegistrationOTP_FullMethodName,
+		FullMethod: UserService_SendRegistrationOTP_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthserviceServer).SendRegistrationOTP(ctx, req.(*SendRegistrationOTPRequest))
+		return srv.(UserServiceServer).SendRegistrationOTP(ctx, req.(*SendRegistrationOTPRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Authservice_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _UserService_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RegisterRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AuthserviceServer).Register(ctx, in)
+		return srv.(UserServiceServer).Register(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Authservice_Register_FullMethodName,
+		FullMethod: UserService_Register_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthserviceServer).Register(ctx, req.(*RegisterRequest))
+		return srv.(UserServiceServer).Register(ctx, req.(*RegisterRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Authservice_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _UserService_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LoginRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AuthserviceServer).Login(ctx, in)
+		return srv.(UserServiceServer).Login(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Authservice_Login_FullMethodName,
+		FullMethod: UserService_Login_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthserviceServer).Login(ctx, req.(*LoginRequest))
+		return srv.(UserServiceServer).Login(ctx, req.(*LoginRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Authservice_GetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _UserService_GetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProfileRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AuthserviceServer).GetProfile(ctx, in)
+		return srv.(UserServiceServer).GetProfile(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Authservice_GetProfile_FullMethodName,
+		FullMethod: UserService_GetProfile_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthserviceServer).GetProfile(ctx, req.(*GetProfileRequest))
+		return srv.(UserServiceServer).GetProfile(ctx, req.(*GetProfileRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// Authservice_ServiceDesc is the grpc.ServiceDesc for Authservice service.
+// UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var Authservice_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "user.Authservice",
-	HandlerType: (*AuthserviceServer)(nil),
+var UserService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "user.UserService",
+	HandlerType: (*UserServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "SendRegistrationOTP",
-			Handler:    _Authservice_SendRegistrationOTP_Handler,
+			Handler:    _UserService_SendRegistrationOTP_Handler,
 		},
 		{
 			MethodName: "Register",
-			Handler:    _Authservice_Register_Handler,
+			Handler:    _UserService_Register_Handler,
 		},
 		{
 			MethodName: "Login",
-			Handler:    _Authservice_Login_Handler,
+			Handler:    _UserService_Login_Handler,
 		},
 		{
 			MethodName: "GetProfile",
-			Handler:    _Authservice_GetProfile_Handler,
+			Handler:    _UserService_GetProfile_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "auth.proto",
+	Metadata: "user.proto",
 }

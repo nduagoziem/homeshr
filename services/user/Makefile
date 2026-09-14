@@ -11,6 +11,7 @@ MIGRATION_NAME := $(word 2,$(MAKECMDGOALS))
 MODULE      := github.com/nduagoziem/homeshr/services/user
 GOBIN       := $(shell go env GOPATH)/bin
 ANNOTATIONS := proto/third_party/google/api/annotations.proto
+PROTO_FILES := $(wildcard proto/*.proto)
 
 ifneq ($(MIGRATION_NAME),)
 $(eval $(MIGRATION_NAME):; @:)
@@ -43,24 +44,19 @@ $(ANNOTATIONS):
 
 vendor-proto: $(ANNOTATIONS) # fetch the vendored import protos
 
-# Generate Go bindings (proto/*.pb.go) and the binary descriptor set
-# (proto/auth.pb) that Envoy's grpc_json_transcoder loads.
+# Generate Go bindings (proto/*.pb.go) and descriptor sets for every proto file
+# that Envoy or other tooling might use.
 proto: $(ANNOTATIONS)
-	PATH="$(PATH):$(GOBIN)" protoc \
-		-I proto -I proto/third_party \
-		--go_out=. --go_opt=module=$(MODULE) \
-		--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
-		--descriptor_set_out=proto/auth.pb --include_imports --include_source_info \
-		proto/auth.proto
+	@for proto_file in $(PROTO_FILES); do \
+		base=$$(basename "$$proto_file" .proto); \
+		PATH="$(PATH):$(GOBIN)" protoc \
+			-I proto -I proto/third_party \
+			--go_out=. --go_opt=module=$(MODULE) \
+			--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
+			--descriptor_set_out="proto/$${base}.pb" --include_imports --include_source_info \
+			"$$proto_file"; \
+	done
 
 run: # start the gRPC auth server on :50051 (Envoy's upstream)
 	go run .
-
-# Envoy is not run from here: it is a Portainer-managed container
-# (homeshr-user-service-envoy, image envoyproxy/envoy:v1.31-latest) created with:
-#   - command:      envoy -c /etc/envoy/envoy.yaml
-#   - port:         32768 -> 10000
-#   - bind mounts:  ./envoy.yaml      -> /etc/envoy/envoy.yaml (ro)
-#                   ./proto/auth.pb   -> /etc/envoy/auth.pb    (ro)
-#   - extra host:   host.docker.internal:host-gateway   (so it can reach `make run` on :50051)
-# After editing envoy.yaml or regenerating auth.pb, restart that container in Portainer.
+	

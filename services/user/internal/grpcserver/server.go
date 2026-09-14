@@ -1,6 +1,6 @@
-// Package grpcserver adapts the domain auth.AuthService to the generated gRPC
-// Authservice interface. It performs no business logic of its own: it maps
-// requests/responses between the proto types and the auth package, and
+// Package grpcserver adapts the domain services to the generated gRPC
+// UserService interface. It performs no business logic of its own: it maps
+// requests/responses between the proto types and the auth/profile packages, and
 // translates domain errors into gRPC status codes (which Envoy, configured with
 // convert_grpc_status, turns back into HTTP+JSON for the client).
 package grpcserver
@@ -11,37 +11,40 @@ import (
 	"log"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/nduagoziem/homeshr/services/user/auth"
-	authpb "github.com/nduagoziem/homeshr/services/user/proto"
+	"github.com/nduagoziem/homeshr/services/user/profile"
+	userpb "github.com/nduagoziem/homeshr/services/user/proto"
 )
 
-// Server implements authpb.AuthserviceServer.
+// Server implements userpb.UserServiceServer.
 type Server struct {
-	authpb.UnimplementedAuthserviceServer
-	auth *auth.AuthService
+	userpb.UnimplementedUserServiceServer
+	auth    *auth.AuthService
+	profile *profile.ProfileService
 }
 
-// New returns a gRPC server backed by the given auth service.
-func New(a *auth.AuthService) *Server {
-	return &Server{auth: a}
+// New returns a gRPC server backed by the given user-domain services.
+func New(a *auth.AuthService, p *profile.ProfileService) *Server {
+	return &Server{auth: a, profile: p}
 }
 
 // SendRegistrationOTP emails a one-time verification code to the address.
-func (s *Server) SendRegistrationOTP(ctx context.Context, req *authpb.SendRegistrationOTPRequest) (*authpb.SendRegistrationOTPResponse, error) {
+func (s *Server) SendRegistrationOTP(ctx context.Context, req *userpb.SendRegistrationOTPRequest) (*userpb.SendRegistrationOTPResponse, error) {
 	if err := s.auth.SendRegistrationOTP(ctx, req.GetEmail()); err != nil {
 		return nil, mapErr(err)
 	}
-	return &authpb.SendRegistrationOTPResponse{
+	return &userpb.SendRegistrationOTPResponse{
 		Message: "verification code sent",
 	}, nil
 }
 
 // Register creates the account (verifying the OTP) and logs the user in.
-func (s *Server) Register(ctx context.Context, req *authpb.RegisterRequest) (*authpb.LoginResponse, error) {
+func (s *Server) Register(ctx context.Context, req *userpb.RegisterRequest) (*userpb.LoginResponse, error) {
 	res, err := s.auth.Register(ctx, req.GetEmail(), req.GetFullName(), req.GetPassword(), req.GetCode())
 	if err != nil {
 		return nil, mapErr(err)
@@ -50,7 +53,7 @@ func (s *Server) Register(ctx context.Context, req *authpb.RegisterRequest) (*au
 }
 
 // Login authenticates the user and returns access + refresh tokens.
-func (s *Server) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
+func (s *Server) Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
 	res, err := s.auth.Login(ctx, req.GetEmail(), req.GetPassword())
 	if err != nil {
 		return nil, mapErr(err)
@@ -60,49 +63,49 @@ func (s *Server) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.L
 
 // GetProfile returns the caller's profile. Envoy has already verified the JWT
 // and forwarded the identity as the x-user-email metadata header.
-func (s *Server) GetProfile(ctx context.Context, _ *authpb.GetProfileRequest) (*authpb.UserProfile, error) {
+func (s *Server) GetProfile(ctx context.Context, _ *userpb.GetProfileRequest) (*userpb.UserProfile, error) {
 	email := metadataValue(ctx, "x-user-email")
 	if email == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing verified identity")
 	}
 
-	user, err := s.auth.GetProfile(ctx, email)
+	user, err := s.profile.GetProfile(ctx, email)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 
-	return &authpb.UserProfile{
-		Id:       userID(user),
+	return &userpb.UserProfile{
+		Id:       uuidString(user.ID),
 		Email:    user.Email,
-		FullName: fullName(user),
+		FullName: textString(user.FullName),
 	}, nil
 }
 
 // pbLoginResponse maps a domain LoginResponse to the proto message.
-func pbLoginResponse(res auth.LoginResponse) *authpb.LoginResponse {
-	return &authpb.LoginResponse{
-		User: &authpb.User{
-			Id:       userID(res.User),
+func pbLoginResponse(res auth.LoginResponse) *userpb.LoginResponse {
+	return &userpb.LoginResponse{
+		User: &userpb.User{
+			Id:       uuidString(res.User.ID),
 			Email:    res.User.Email,
-			FullName: fullName(res.User),
+			FullName: textString(res.User.FullName),
 		},
 		AccessToken:  res.AccessToken,
 		RefreshToken: res.RefreshToken,
 	}
 }
 
-func userID(u auth.LoginUser) string {
-	if !u.ID.Valid {
+func uuidString(id pgtype.UUID) string {
+	if !id.Valid {
 		return ""
 	}
-	return uuid.UUID(u.ID.Bytes).String()
+	return uuid.UUID(id.Bytes).String()
 }
 
-func fullName(u auth.LoginUser) string {
-	if !u.FullName.Valid {
+func textString(text pgtype.Text) string {
+	if !text.Valid {
 		return ""
 	}
-	return u.FullName.String
+	return text.String
 }
 
 // metadataValue returns the first value for key in the incoming gRPC metadata.
@@ -128,7 +131,7 @@ func mapErr(err error) error {
 		return status.Error(codes.Unauthenticated, err.Error())
 	case errors.Is(err, auth.ErrInvalidOTP):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, auth.ErrUserNotFound):
+	case errors.Is(err, auth.ErrUserNotFound), errors.Is(err, profile.ErrUserNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	default:
 		// Log the real cause server-side; return a generic message so

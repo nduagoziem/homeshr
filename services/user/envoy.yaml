@@ -1,14 +1,14 @@
 # Envoy bootstrap for the homeshr user service.
 #
 # Flow: client JSON/HTTP  ->  Envoy (jwt_authn -> grpc_json_transcoder)  ->
-#       gRPC auth server (host.docker.internal:50051)  ->  Envoy  ->  JSON/HTTP.
+#       gRPC user server (host.docker.internal:50051)  ->  Envoy  ->  JSON/HTTP.
 #
 # The gRPC server runs on the host; this Envoy runs in Docker and reaches it via
 # host.docker.internal. On native Docker (WSL2) that name only resolves when the
 # container is created with the extra host mapping `host.docker.internal:host-gateway`
 # (Portainer: Network tab -> "Hosts file entries"). Host port 32768 maps to the
-# listener on container port 10000. This file and proto/auth.pb must be bind-mounted
-# into /etc/envoy/ (envoy.yaml -> /etc/envoy/envoy.yaml, auth.pb -> /etc/envoy/auth.pb).
+# listener on container port 10000. This file and proto/user.pb must be bind-mounted
+# into /etc/envoy/ (envoy.yaml -> /etc/envoy/envoy.yaml, user.pb -> /etc/envoy/user.pb).
 #
 # NOTE: the jwt_authn provider validates HS256 tokens with an inline JWKS "oct"
 # key. Its `k` value is the base64url (no padding) encoding of JWT_SECRET in
@@ -66,9 +66,9 @@ static_resources:
           - name: envoy.filters.http.grpc_json_transcoder
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
-              proto_descriptor: /etc/envoy/auth.pb
+              proto_descriptor: /etc/envoy/user.pb
               services:
-              - user.Authservice
+              - user.UserService
               convert_grpc_status: true
               print_options:
                 add_whitespace: true

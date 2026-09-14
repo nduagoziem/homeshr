@@ -5,7 +5,7 @@ option go_package = "github.com/nduagoziem/homeshr/services/user/proto;authpb";
 
 import "google/api/annotations.proto";
 
-service Authservice {
+service UserService {
   // Public: emails a one-time verification code for registration.
   rpc SendRegistrationOTP(SendRegistrationOTPRequest) returns (SendRegistrationOTPResponse) {
     option (google.api.http) = {

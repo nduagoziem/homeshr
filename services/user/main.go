@@ -17,7 +17,8 @@ import (
 	"github.com/nduagoziem/homeshr/services/user/internal/cache"
 	"github.com/nduagoziem/homeshr/services/user/internal/db"
 	"github.com/nduagoziem/homeshr/services/user/internal/grpcserver"
-	authpb "github.com/nduagoziem/homeshr/services/user/proto"
+	"github.com/nduagoziem/homeshr/services/user/profile"
+	userpb "github.com/nduagoziem/homeshr/services/user/proto"
 )
 
 const (
@@ -33,6 +34,7 @@ func main() {
 	queries := db.NewPostgresPool(ctx, os.Getenv("DATABASE_URL"))
 	redis := cache.NewRedisCache(ctx, os.Getenv("REDIS_URL"))
 
+	// User Authentication
 	authService := auth.NewAuthService(auth.AuthServiceConfig{
 		Queries:        queries,
 		Redis:          redis,
@@ -41,6 +43,9 @@ func main() {
 		ResendAPIKey:   os.Getenv("RESEND_API_KEY"),
 		OTPSender:      os.Getenv("OTP_SENDER"),
 	})
+
+	// User Profile
+	profileService := profile.ProfileService{Queries: queries}
 
 	gRPCPort := os.Getenv("GRPC_PORT")
 	if gRPCPort == "" {
@@ -53,11 +58,12 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	authpb.RegisterAuthserviceServer(grpcServer, grpcserver.New(authService))
+	userpb.RegisterUserServiceServer(grpcServer, grpcserver.New(authService, &profileService))
+
 	// Reflection lets tools like grpcurl introspect the service during development.
 	reflection.Register(grpcServer)
 
-	log.Printf("gRPC auth server listening on %s", gRPCPort)
+	log.Printf("gRPC user server listening on %s", gRPCPort)
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server stopped: %v", err)
 	}
