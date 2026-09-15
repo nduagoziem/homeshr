@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrQueriesRequired    = errors.New("auth service requires db queries")
-	ErrInvalidOTP         = errors.New("invalid or expired verification code")
-	ErrUserNotFound       = errors.New("user not found")
+	ErrUserAlreadyExists   = errors.New("user already exists")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrQueriesRequired     = errors.New("auth service requires db queries")
+	ErrInvalidOTP          = errors.New("invalid or expired verification code")
+	ErrUserNotFound        = errors.New("user not found")
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 )
 
 const defaultRefreshTokenTTL = 30 * 24 * time.Hour
@@ -58,6 +59,20 @@ func NewAuthService(cfg AuthServiceConfig) *AuthService {
 	}
 }
 
+// AuthResponse represents the response returned after a successful login or registration.
+type AuthResponse struct {
+	User                  AuthRequest `json:"user"`
+	AccessToken           string      `json:"access_token"`
+	RefreshToken          string      `json:"refresh_token"`
+	RefreshTokenExpiresAt time.Time   `json:"-"`
+}
+
+type AuthRequest struct {
+	ID       pgtype.UUID `json:"id"`
+	Email    string      `json:"email"`
+	FullName pgtype.Text `json:"full_name"`
+}
+
 // SendRegistrationOTP verifies that the email is not already taken and emails a
 // one-time verification code to it. This is the first step of registration: the
 // user must supply the returned code back to Register to prove ownership of the
@@ -89,22 +104,22 @@ func (s *AuthService) SendRegistrationOTP(ctx context.Context, email string) err
 //
 // The code is the OTP previously emailed by SendRegistrationOTP; it must be valid
 // for the given email or the account is not created.
-func (s *AuthService) Register(ctx context.Context, email, fullName, password, code string) (LoginResponse, error) {
+func (s *AuthService) Register(ctx context.Context, email, fullName, password, code string) (AuthResponse, error) {
 
 	//Check if the queries are set
 	if s.queries == nil {
-		return LoginResponse{}, ErrQueriesRequired
+		return AuthResponse{}, ErrQueriesRequired
 	}
 
 	// Check if user exists
 	_, err := s.queries.FindUserByEmail(ctx, email)
 	if err == nil {
-		return LoginResponse{}, ErrUserAlreadyExists
+		return AuthResponse{}, ErrUserAlreadyExists
 	}
 
 	// Only proceed if the error was "user not found"
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 
 	// Verify the OTP proves the user owns this email before creating the account.
@@ -112,18 +127,18 @@ func (s *AuthService) Register(ctx context.Context, email, fullName, password, c
 	if err != nil {
 		// A missing key means the code was never sent or has expired.
 		if errors.Is(err, redis.Nil) {
-			return LoginResponse{}, ErrInvalidOTP
+			return AuthResponse{}, ErrInvalidOTP
 		}
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 	if !valid {
-		return LoginResponse{}, ErrInvalidOTP
+		return AuthResponse{}, ErrInvalidOTP
 	}
 
 	// Hash the user's password
 	pass, err := hashPassword(password)
 	if err != nil {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 
 	user, err := s.queries.CreateUser(ctx, db.CreateUserParams{
@@ -133,77 +148,84 @@ func (s *AuthService) Register(ctx context.Context, email, fullName, password, c
 		FullName:     pgtype.Text{String: fullName, Valid: fullName != ""},
 	})
 	if err != nil {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 
-	return s.issueTokens(ctx, LoginUser{
+	return s.issueTokens(ctx, AuthRequest{
 		ID:       user.ID,
 		Email:    user.Email,
 		FullName: user.FullName,
 	})
 }
 
-// LoginResponse represents the response returned after a successful login or registration.
-type LoginResponse struct {
-	User         LoginUser `json:"user"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-}
-
-type LoginUser struct {
-	ID       pgtype.UUID `json:"id"`
-	Email    string      `json:"email"`
-	FullName pgtype.Text `json:"full_name"`
-}
-
-func (s *AuthService) Login(ctx context.Context, email, password string) (LoginResponse, error) {
+func (s *AuthService) Login(ctx context.Context, email, password string) (AuthResponse, error) {
 	if s.queries == nil {
-		return LoginResponse{}, ErrQueriesRequired
+		return AuthResponse{}, ErrQueriesRequired
 	}
 
 	user, err := s.queries.FindUserByEmail(ctx, email)
 
 	// Check if the user exists
 	if errors.Is(err, pgx.ErrNoRows) {
-		return LoginResponse{}, ErrInvalidCredentials
+		return AuthResponse{}, ErrInvalidCredentials
 	}
 	if err != nil {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 
 	if err := verifyPassword(user.PasswordHash, password); err != nil {
-		return LoginResponse{}, ErrInvalidCredentials
+		return AuthResponse{}, ErrInvalidCredentials
 	}
 
-	return s.issueTokens(ctx, LoginUser{
+	return s.issueTokens(ctx, AuthRequest{
 		ID:       user.ID,
 		Email:    user.Email,
 		FullName: user.FullName,
 	})
 }
 
-// GetProfile returns the profile of the user identified by email.
-//
-// It backs the protected profile endpoint: Envoy validates the caller's JWT and
-// forwards the verified identity, and this looks up the corresponding record.
-func (s *AuthService) GetProfile(ctx context.Context, email string) (LoginUser, error) {
+// RefreshAccessToken generates a new access token when the existing one has expired.
+func (s *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (AuthResponse, error) {
 	if s.queries == nil {
-		return LoginUser{}, ErrQueriesRequired
+		return AuthResponse{}, ErrQueriesRequired
+	}
+	if refreshToken == "" {
+		return AuthResponse{}, ErrInvalidRefreshToken
 	}
 
-	user, err := s.queries.FindUserByEmail(ctx, email)
+	storedToken, err := s.queries.GetRefreshToken(ctx, refreshToken)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return LoginUser{}, ErrUserNotFound
+		return AuthResponse{}, ErrInvalidRefreshToken
 	}
 	if err != nil {
-		return LoginUser{}, err
+		return AuthResponse{}, err
 	}
 
-	return LoginUser{
+	now := time.Now().UTC()
+	if storedToken.Revoked || !storedToken.ExpiresAt.Valid || !storedToken.ExpiresAt.Time.After(now) {
+		if !storedToken.Revoked {
+			_ = s.queries.RevokeRefreshTokenByID(ctx, storedToken.ID)
+		}
+		return AuthResponse{}, ErrInvalidRefreshToken
+	}
+
+	user, err := s.queries.FindUserByID(ctx, storedToken.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthResponse{}, ErrInvalidRefreshToken
+	}
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
+	if err := s.queries.RevokeRefreshTokenByID(ctx, storedToken.ID); err != nil {
+		return AuthResponse{}, err
+	}
+
+	return s.issueTokens(ctx, AuthRequest{
 		ID:       user.ID,
 		Email:    user.Email,
 		FullName: user.FullName,
-	}, nil
+	})
 }
 
 func hashPassword(password string) (string, error) {
@@ -219,18 +241,19 @@ func verifyPassword(hashedPass, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(password))
 }
 
-// generateAccessToken creates a new JWT access token
-func (s *AuthService) generateAccessToken(user LoginUser) (string, error) {
+// generateAccessToken creates a new JWT access token.
+func (s *AuthService) generateAccessToken(user AuthRequest, refreshTokenID pgtype.UUID) (string, error) {
 	// Set the expiration time
 	now := time.Now().UTC()
 	expirationTime := now.Add(s.accessTokenTTL)
 
 	// Create the JWT claims
 	claims := jwt.MapClaims{
-		"sub":   uuid.UUID(user.ID.Bytes).String(), // subject (user ID)
-		"email": user.Email,                        // custom claim
-		"exp":   expirationTime.Unix(),             // expiration time
-		"iat":   now.Unix(),                        // issued at time
+		"sub":   uuid.UUID(user.ID.Bytes).String(),        // subject (user ID)
+		"email": user.Email,                               // custom claim
+		"rtid":  uuid.UUID(refreshTokenID.Bytes).String(), // refresh token ID
+		"exp":   expirationTime.Unix(),                    // expiration time
+		"iat":   now.Unix(),                               // issued at time
 	}
 
 	// Create the token with claims
@@ -245,36 +268,40 @@ func (s *AuthService) generateAccessToken(user LoginUser) (string, error) {
 	return tokenString, nil
 }
 
-func (s *AuthService) issueTokens(ctx context.Context, user LoginUser) (LoginResponse, error) {
-	accessToken, err := s.generateAccessToken(user)
-	if err != nil {
-		return LoginResponse{}, err
-	}
-
+// issueTokens issues access tokens from generateAccessToken
+// and rotates/creates a new refresh token.
+func (s *AuthService) issueTokens(ctx context.Context, user AuthRequest) (AuthResponse, error) {
 	now := time.Now().UTC()
+	refreshTokenExpiresAt := now.Add(defaultRefreshTokenTTL)
 	refreshToken := uuid.NewString()
-	_, err = s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+	storedToken, err := s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		Token:     refreshToken,
 		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
-		ExpiresAt: pgtype.Timestamptz{Time: now.Add(defaultRefreshTokenTTL), Valid: true},
+		ExpiresAt: pgtype.Timestamptz{Time: refreshTokenExpiresAt, Valid: true},
 		Revoked:   false,
 	})
 	if err != nil {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
+	}
+
+	accessToken, err := s.generateAccessToken(user, storedToken.ID)
+	if err != nil {
+		return AuthResponse{}, err
 	}
 
 	if err := s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
 		LastLogin: pgtype.Timestamptz{Time: now, Valid: true},
 		ID:        user.ID,
 	}); err != nil {
-		return LoginResponse{}, err
+		return AuthResponse{}, err
 	}
 
-	return LoginResponse{
-		User:         user,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+	return AuthResponse{
+		User:                  user,
+		AccessToken:           accessToken,
+		RefreshToken:          refreshToken,
+		RefreshTokenExpiresAt: refreshTokenExpiresAt,
 	}, nil
 }
 

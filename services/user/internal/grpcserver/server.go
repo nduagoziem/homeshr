@@ -9,9 +9,12 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -20,6 +23,8 @@ import (
 	"github.com/nduagoziem/homeshr/services/user/profile"
 	userpb "github.com/nduagoziem/homeshr/services/user/proto"
 )
+
+const refreshTokenCookieName = "refresh_token"
 
 // Server implements userpb.UserServiceServer.
 type Server struct {
@@ -44,21 +49,44 @@ func (s *Server) SendRegistrationOTP(ctx context.Context, req *userpb.SendRegist
 }
 
 // Register creates the account (verifying the OTP) and logs the user in.
-func (s *Server) Register(ctx context.Context, req *userpb.RegisterRequest) (*userpb.LoginResponse, error) {
+func (s *Server) Register(ctx context.Context, req *userpb.RegisterRequest) (*userpb.AuthResponse, error) {
 	res, err := s.auth.Register(ctx, req.GetEmail(), req.GetFullName(), req.GetPassword(), req.GetCode())
 	if err != nil {
 		return nil, mapErr(err)
+	}
+	if err := setRefreshTokenCookie(ctx, res.RefreshToken, res.RefreshTokenExpiresAt); err != nil {
+		return nil, err
 	}
 	return pbLoginResponse(res), nil
 }
 
 // Login authenticates the user and returns access + refresh tokens.
-func (s *Server) Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
+func (s *Server) Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.AuthResponse, error) {
 	res, err := s.auth.Login(ctx, req.GetEmail(), req.GetPassword())
 	if err != nil {
 		return nil, mapErr(err)
 	}
+	if err := setRefreshTokenCookie(ctx, res.RefreshToken, res.RefreshTokenExpiresAt); err != nil {
+		return nil, err
+	}
 	return pbLoginResponse(res), nil
+}
+
+// RefreshAccessToken rotates the refresh token from the HttpOnly cookie and
+// returns a new access token.
+func (s *Server) RefreshAccessToken(ctx context.Context, _ *userpb.RefreshAccessTokenRequest) (*userpb.RefreshAccessTokenResponse, error) {
+	refreshToken := refreshTokenFromCookie(ctx)
+	res, err := s.auth.RefreshAccessToken(ctx, refreshToken)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	if err := setRefreshTokenCookie(ctx, res.RefreshToken, res.RefreshTokenExpiresAt); err != nil {
+		return nil, err
+	}
+
+	return &userpb.RefreshAccessTokenResponse{
+		AccessToken: res.AccessToken,
+	}, nil
 }
 
 // GetProfile returns the caller's profile. Envoy has already verified the JWT
@@ -81,17 +109,52 @@ func (s *Server) GetProfile(ctx context.Context, _ *userpb.GetProfileRequest) (*
 	}, nil
 }
 
-// pbLoginResponse maps a domain LoginResponse to the proto message.
-func pbLoginResponse(res auth.LoginResponse) *userpb.LoginResponse {
-	return &userpb.LoginResponse{
-		User: &userpb.User{
+// pbLoginResponse maps a domain AuthResponse to the proto message.
+func pbLoginResponse(res auth.AuthResponse) *userpb.AuthResponse {
+	return &userpb.AuthResponse{
+		User: &userpb.AuthUser{
 			Id:       uuidString(res.User.ID),
 			Email:    res.User.Email,
 			FullName: textString(res.User.FullName),
 		},
-		AccessToken:  res.AccessToken,
-		RefreshToken: res.RefreshToken,
+		AccessToken: res.AccessToken,
 	}
+}
+
+func setRefreshTokenCookie(ctx context.Context, token string, expiresAt time.Time) error {
+	cookie := (&http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    token,
+		Path:     "/v1/auth/refresh",
+		Expires:  expiresAt,
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}).String()
+
+	if err := grpc.SetHeader(ctx, metadata.Pairs("set-cookie", cookie)); err != nil {
+		log.Printf("grpcserver: failed setting refresh token cookie: %v", err)
+		return status.Error(codes.Internal, "internal error")
+	}
+	return nil
+}
+
+func refreshTokenFromCookie(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+
+	req := http.Request{Header: http.Header{}}
+	for _, value := range md.Get("cookie") {
+		req.Header.Add("Cookie", value)
+	}
+
+	cookie, err := req.Cookie(refreshTokenCookieName)
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
 }
 
 func uuidString(id pgtype.UUID) string {
@@ -128,6 +191,8 @@ func mapErr(err error) error {
 	case errors.Is(err, auth.ErrUserAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
+		return status.Error(codes.Unauthenticated, err.Error())
+	case errors.Is(err, auth.ErrInvalidRefreshToken):
 		return status.Error(codes.Unauthenticated, err.Error())
 	case errors.Is(err, auth.ErrInvalidOTP):
 		return status.Error(codes.InvalidArgument, err.Error())

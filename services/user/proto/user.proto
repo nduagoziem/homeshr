@@ -15,7 +15,7 @@ service UserService {
   }
 
   // Public: creates a user (verifying the OTP) and logs them in.
-  rpc Register(RegisterRequest) returns (LoginResponse) {
+  rpc Register(RegisterRequest) returns (AuthResponse) {
     option (google.api.http) = {
       post: "/v1/auth/register"
       body: "*"
@@ -23,9 +23,18 @@ service UserService {
   }
 
   // Public: authenticates and returns access + refresh tokens.
-  rpc Login(LoginRequest) returns (LoginResponse) {
+  rpc Login(LoginRequest) returns (AuthResponse) {
     option (google.api.http) = {
       post: "/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  // Public: exchanges the HttpOnly refresh_token cookie for a new access token
+  // and rotated refresh_token cookie.
+  rpc RefreshAccessToken(RefreshAccessTokenRequest) returns (RefreshAccessTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/refresh"
       body: "*"
     };
   }
@@ -59,16 +68,21 @@ message LoginRequest {
   string password = 2;
 }
 
-message User {
+message RefreshAccessTokenRequest {}
+
+message RefreshAccessTokenResponse {
+  string access_token = 1;
+}
+
+message AuthUser {
   string id = 1;
   string email = 2;
   string full_name = 3;
 }
 
-message LoginResponse {
-  User user = 1;
+message AuthResponse {
+  AuthUser user = 1;
   string access_token = 2;
-  string refresh_token = 3;
 }
 
 message GetProfileRequest {}

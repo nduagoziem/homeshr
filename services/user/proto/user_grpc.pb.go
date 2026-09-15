@@ -22,6 +22,7 @@ const (
 	UserService_SendRegistrationOTP_FullMethodName = "/user.UserService/SendRegistrationOTP"
 	UserService_Register_FullMethodName            = "/user.UserService/Register"
 	UserService_Login_FullMethodName               = "/user.UserService/Login"
+	UserService_RefreshAccessToken_FullMethodName  = "/user.UserService/RefreshAccessToken"
 	UserService_GetProfile_FullMethodName          = "/user.UserService/GetProfile"
 )
 
@@ -32,9 +33,12 @@ type UserServiceClient interface {
 	// Public: emails a one-time verification code for registration.
 	SendRegistrationOTP(ctx context.Context, in *SendRegistrationOTPRequest, opts ...grpc.CallOption) (*SendRegistrationOTPResponse, error)
 	// Public: creates a user (verifying the OTP) and logs them in.
-	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*AuthResponse, error)
 	// Public: authenticates and returns access + refresh tokens.
-	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*AuthResponse, error)
+	// Public: exchanges the HttpOnly refresh_token cookie for a new access token
+	// and rotated refresh_token cookie.
+	RefreshAccessToken(ctx context.Context, in *RefreshAccessTokenRequest, opts ...grpc.CallOption) (*RefreshAccessTokenResponse, error)
 	// Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
 	// which forwards the verified identity as x-user-id / x-user-email).
 	GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error)
@@ -58,9 +62,9 @@ func (c *userServiceClient) SendRegistrationOTP(ctx context.Context, in *SendReg
 	return out, nil
 }
 
-func (c *userServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+func (c *userServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*AuthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(LoginResponse)
+	out := new(AuthResponse)
 	err := c.cc.Invoke(ctx, UserService_Register_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -68,10 +72,20 @@ func (c *userServiceClient) Register(ctx context.Context, in *RegisterRequest, o
 	return out, nil
 }
 
-func (c *userServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+func (c *userServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*AuthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(LoginResponse)
+	out := new(AuthResponse)
 	err := c.cc.Invoke(ctx, UserService_Login_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) RefreshAccessToken(ctx context.Context, in *RefreshAccessTokenRequest, opts ...grpc.CallOption) (*RefreshAccessTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshAccessTokenResponse)
+	err := c.cc.Invoke(ctx, UserService_RefreshAccessToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -95,9 +109,12 @@ type UserServiceServer interface {
 	// Public: emails a one-time verification code for registration.
 	SendRegistrationOTP(context.Context, *SendRegistrationOTPRequest) (*SendRegistrationOTPResponse, error)
 	// Public: creates a user (verifying the OTP) and logs them in.
-	Register(context.Context, *RegisterRequest) (*LoginResponse, error)
+	Register(context.Context, *RegisterRequest) (*AuthResponse, error)
 	// Public: authenticates and returns access + refresh tokens.
-	Login(context.Context, *LoginRequest) (*LoginResponse, error)
+	Login(context.Context, *LoginRequest) (*AuthResponse, error)
+	// Public: exchanges the HttpOnly refresh_token cookie for a new access token
+	// and rotated refresh_token cookie.
+	RefreshAccessToken(context.Context, *RefreshAccessTokenRequest) (*RefreshAccessTokenResponse, error)
 	// Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
 	// which forwards the verified identity as x-user-id / x-user-email).
 	GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error)
@@ -114,11 +131,14 @@ type UnimplementedUserServiceServer struct{}
 func (UnimplementedUserServiceServer) SendRegistrationOTP(context.Context, *SendRegistrationOTPRequest) (*SendRegistrationOTPResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendRegistrationOTP not implemented")
 }
-func (UnimplementedUserServiceServer) Register(context.Context, *RegisterRequest) (*LoginResponse, error) {
+func (UnimplementedUserServiceServer) Register(context.Context, *RegisterRequest) (*AuthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedUserServiceServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
+func (UnimplementedUserServiceServer) Login(context.Context, *LoginRequest) (*AuthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedUserServiceServer) RefreshAccessToken(context.Context, *RefreshAccessTokenRequest) (*RefreshAccessTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshAccessToken not implemented")
 }
 func (UnimplementedUserServiceServer) GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProfile not implemented")
@@ -198,6 +218,24 @@ func _UserService_Login_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_RefreshAccessToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshAccessTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).RefreshAccessToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_RefreshAccessToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).RefreshAccessToken(ctx, req.(*RefreshAccessTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_GetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProfileRequest)
 	if err := dec(in); err != nil {
@@ -234,6 +272,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Login",
 			Handler:    _UserService_Login_Handler,
+		},
+		{
+			MethodName: "RefreshAccessToken",
+			Handler:    _UserService_RefreshAccessToken_Handler,
 		},
 		{
 			MethodName: "GetProfile",

@@ -71,3 +71,12 @@ func (q *Queries) RevokeRefreshToken(ctx context.Context, token string) error {
 	_, err := q.db.Exec(ctx, revokeRefreshToken, token)
 	return err
 }
+
+const revokeRefreshTokenByID = `-- name: RevokeRefreshTokenByID :exec
+UPDATE refresh_tokens SET revoked = true WHERE id = $1
+`
+
+func (q *Queries) RevokeRefreshTokenByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeRefreshTokenByID, id)
+	return err
+}
