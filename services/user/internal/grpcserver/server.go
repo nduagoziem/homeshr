@@ -7,9 +7,12 @@ package grpcserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,8 +79,16 @@ func (s *Server) Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.A
 // returns a new access token.
 func (s *Server) RefreshAccessToken(ctx context.Context, _ *userpb.RefreshAccessTokenRequest) (*userpb.RefreshAccessTokenResponse, error) {
 	refreshToken := refreshTokenFromCookie(ctx)
+	if refreshToken == "" {
+		logRefreshTokenCookieMiss(ctx)
+		return nil, status.Error(codes.Unauthenticated, "missing refresh token cookie")
+	}
+
 	res, err := s.auth.RefreshAccessToken(ctx, refreshToken)
 	if err != nil {
+		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+			log.Printf("grpcserver: refresh token rejected (len=%d fingerprint=%s)", len(refreshToken), tokenFingerprint(refreshToken))
+		}
 		return nil, mapErr(err)
 	}
 	if err := setRefreshTokenCookie(ctx, res.RefreshToken, res.RefreshTokenExpiresAt); err != nil {
@@ -125,7 +136,7 @@ func setRefreshTokenCookie(ctx context.Context, token string, expiresAt time.Tim
 	cookie := (&http.Cookie{
 		Name:     refreshTokenCookieName,
 		Value:    token,
-		Path:     "/v1/auth/refresh",
+		Path:     "/",
 		Expires:  expiresAt,
 		MaxAge:   int(time.Until(expiresAt).Seconds()),
 		HttpOnly: true,
@@ -145,16 +156,77 @@ func refreshTokenFromCookie(ctx context.Context) string {
 		return ""
 	}
 
-	req := http.Request{Header: http.Header{}}
-	for _, value := range md.Get("cookie") {
-		req.Header.Add("Cookie", value)
+	for _, key := range []string{"cookie", "x-refresh-cookie"} {
+		for _, value := range md.Get(key) {
+			if token := refreshTokenFromCookieHeader(value); token != "" {
+				return token
+			}
+		}
 	}
 
-	cookie, err := req.Cookie(refreshTokenCookieName)
-	if err != nil {
+	return ""
+}
+
+func refreshTokenFromCookieHeader(header string) string {
+	header = strings.TrimSpace(header)
+	if header == "" {
 		return ""
 	}
-	return cookie.Value
+
+	header = strings.TrimPrefix(strings.TrimPrefix(header, "Cookie:"), "cookie:")
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return ""
+	}
+
+	if !strings.Contains(header, "=") {
+		return header
+	}
+
+	req := http.Request{Header: http.Header{}}
+	req.Header.Add("Cookie", header)
+	if cookie, err := req.Cookie(refreshTokenCookieName); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		name, value, ok := strings.Cut(part, "=")
+		if ok && strings.EqualFold(name, refreshTokenCookieName) {
+			return strings.TrimSpace(value)
+		}
+	}
+
+	return ""
+}
+
+func logRefreshTokenCookieMiss(ctx context.Context) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Print("grpcserver: missing refresh token cookie (no incoming metadata)")
+		return
+	}
+
+	log.Printf(
+		"grpcserver: missing refresh token cookie (cookie_headers=%d x_refresh_cookie_headers=%d original_method=%q original_path=%q)",
+		len(md.Get("cookie")),
+		len(md.Get("x-refresh-cookie")),
+		firstMetadataValue(md, "x-envoy-original-method"),
+		firstMetadataValue(md, "x-envoy-original-path"),
+	)
+}
+
+func firstMetadataValue(md metadata.MD, key string) string {
+	values := md.Get(key)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func tokenFingerprint(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func uuidString(id pgtype.UUID) string {
