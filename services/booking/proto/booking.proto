@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package booking;
+option go_package = "github.com/nduagoziem/homeshr/services/booking/proto;bookingpb";
+
+import "google/api/annotations.proto";
+
+service BookingService {
+  // Protected: creates a reservation for the caller. Envoy validates the JWT
+  // and forwards the guest identity as the x-user-id header. The service checks
+  // for overlapping bookings on the property before confirming.
+  rpc CreateBooking(CreateBookingRequest) returns (Booking) {
+    option (google.api.http) = {
+      post: "/v1/bookings"
+      body: "*"
+    };
+  }
+
+  // Protected: returns a single booking. Only the guest who made the booking
+  // may fetch it.
+  rpc GetBooking(GetBookingRequest) returns (Booking) {
+    option (google.api.http) = {
+      get: "/v1/bookings/{id}"
+    };
+  }
+
+  // Protected: lists every booking made by the calling guest.
+  rpc ListUserBookings(ListUserBookingsRequest) returns (ListUserBookingsResponse) {
+    option (google.api.http) = {
+      get: "/v1/bookings/list"
+    };
+  }
+
+  // Protected: cancels a booking owned by the caller, freeing up its dates.
+  rpc CancelBooking(CancelBookingRequest) returns (Booking) {
+    option (google.api.http) = {
+      post: "/v1/bookings/{id}/cancel"
+      body: "*"
+    };
+  }
+
+  // Public: reports whether a property is free for a date range. check_in_date
+  // and check_out_date are supplied as query parameters.
+  rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse) {
+    option (google.api.http) = {
+      get: "/v1/properties/{property_id}/availability"
+    };
+  }
+}
+
+// Booking is the canonical reservation record returned by the API. Dates are
+// ISO-8601 calendar days (YYYY-MM-DD); prices are integer minor units (e.g.
+// cents) to avoid floating-point rounding; timestamps are RFC 3339.
+message Booking {
+  string id = 1;
+  string property_id = 2;
+  string guest_id = 3;
+  string check_in_date = 4;
+  string check_out_date = 5;
+  int32 total_guests = 6;
+  int64 nightly_price = 7;
+  int64 total_price = 8;
+  string status = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message CreateBookingRequest {
+  string property_id = 1;
+  string check_in_date = 2;
+  string check_out_date = 3;
+  int32 total_guests = 4;
+  // nightly_price is the per-night rate quoted to the guest, in minor units.
+  // (A dedicated property/pricing service would own this in a fuller system.)
+  int64 nightly_price = 5;
+}
+
+message GetBookingRequest {
+  string id = 1;
+}
+
+message ListUserBookingsRequest {}
+
+message ListUserBookingsResponse {
+  repeated Booking bookings = 1;
+}
+
+message CancelBookingRequest {
+  string id = 1;
+}
+
+message CheckAvailabilityRequest {
+  string property_id = 1;
+  string check_in_date = 2;
+  string check_out_date = 3;
+}
+
+message CheckAvailabilityResponse {
+  string property_id = 1;
+  string check_in_date = 2;
+  string check_out_date = 3;
+  bool available = 4;
+}
