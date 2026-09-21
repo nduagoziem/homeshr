@@ -166,7 +166,7 @@ func mapErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, booking.ErrUnauthorized):
 		return status.Error(codes.PermissionDenied, err.Error())
-	case errors.Is(err, booking.ErrBookingNotActive):
+	case errors.Is(err, booking.ErrBookingIsCancelled):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, cache.ErrLockNotAcquired):
 		return status.Error(codes.Aborted, "the property is busy, please retry")

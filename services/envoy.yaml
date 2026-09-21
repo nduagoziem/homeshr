@@ -85,6 +85,7 @@ static_resources:
               services:
               - user.UserService
               - booking.BookingService
+              match_incoming_request_route: true
               convert_grpc_status: true
               print_options:
                 add_whitespace: true

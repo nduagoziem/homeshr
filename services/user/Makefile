@@ -44,16 +44,14 @@ $(ANNOTATIONS):
 
 vendor-proto: $(ANNOTATIONS) # fetch the vendored import protos
 
-# Generate Go bindings (proto/*.pb.go) and descriptor sets for every proto file
-# that Envoy or other tooling might use.
+# Generate Go bindings (proto/*.pb.go and proto/*_grpc.pb.go). The central
+# Envoy descriptor is generated from services/Makefile.
 proto: $(ANNOTATIONS)
 	@for proto_file in $(PROTO_FILES); do \
-		base=$$(basename "$$proto_file" .proto); \
 		PATH="$(PATH):$(GOBIN)" protoc \
 			-I proto -I proto/third_party \
 			--go_out=. --go_opt=module=$(MODULE) \
 			--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
-			--descriptor_set_out="proto/$${base}.pb" --include_imports --include_source_info \
 			"$$proto_file"; \
 	done
 
