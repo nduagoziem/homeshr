@@ -39,6 +39,15 @@ service UserService {
     };
   }
 
+  // Public: revokes the refresh token from the HttpOnly cookie and clears the
+  // cookie, ending the user's session.
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/logout"
+      body: "*"
+    };
+  }
+
   // Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
   // which forwards the verified identity as x-user-id / x-user-email).
   rpc GetProfile(GetProfileRequest) returns (UserProfile) {
@@ -86,6 +95,12 @@ message AuthResponse {
 }
 
 message GetProfileRequest {}
+
+message LogoutRequest {}
+
+message LogoutResponse {
+  string message = 1;
+}
 
 message UserProfile {
   string id = 1;

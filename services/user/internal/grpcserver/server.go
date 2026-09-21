@@ -100,6 +100,24 @@ func (s *Server) RefreshAccessToken(ctx context.Context, _ *userpb.RefreshAccess
 	}, nil
 }
 
+// Logout revokes the refresh token from the HttpOnly cookie and clears the
+// cookie, ending the user's session.
+func (s *Server) Logout(ctx context.Context, _ *userpb.LogoutRequest) (*userpb.LogoutResponse, error) {
+	refreshToken := refreshTokenFromCookie(ctx)
+	if refreshToken != "" {
+		if err := s.auth.Logout(ctx, refreshToken); err != nil {
+			// Log but don't fail — clearing the cookie is more important.
+			log.Printf("grpcserver: failed to revoke refresh token on logout: %v", err)
+		}
+	}
+	if err := clearRefreshTokenCookie(ctx); err != nil {
+		return nil, err
+	}
+	return &userpb.LogoutResponse{
+		Message: "logged out",
+	}, nil
+}
+
 // GetProfile returns the caller's profile. Envoy has already verified the JWT
 // and forwarded the identity as the x-user-email metadata header.
 func (s *Server) GetProfile(ctx context.Context, _ *userpb.GetProfileRequest) (*userpb.UserProfile, error) {
@@ -145,6 +163,23 @@ func setRefreshTokenCookie(ctx context.Context, token string, expiresAt time.Tim
 
 	if err := grpc.SetHeader(ctx, metadata.Pairs("set-cookie", cookie)); err != nil {
 		log.Printf("grpcserver: failed setting refresh token cookie: %v", err)
+		return status.Error(codes.Internal, "internal error")
+	}
+	return nil
+}
+
+func clearRefreshTokenCookie(ctx context.Context) error {
+	cookie := (&http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}).String()
+
+	if err := grpc.SetHeader(ctx, metadata.Pairs("set-cookie", cookie)); err != nil {
+		log.Printf("grpcserver: failed clearing refresh token cookie: %v", err)
 		return status.Error(codes.Internal, "internal error")
 	}
 	return nil

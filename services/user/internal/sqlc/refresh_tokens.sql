@@ -11,3 +11,9 @@ UPDATE refresh_tokens SET revoked = true WHERE token = $1;
 
 -- name: RevokeRefreshTokenByID :exec
 UPDATE refresh_tokens SET revoked = true WHERE id = $1;
+
+-- name: RevokeAllUserRefreshTokens :exec
+UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false;
+
+-- name: PurgeExpiredRefreshTokens :execrows
+DELETE FROM refresh_tokens WHERE revoked = true OR expires_at < NOW();

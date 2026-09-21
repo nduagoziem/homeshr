@@ -63,9 +63,36 @@ func main() {
 	// Reflection lets tools like grpcurl introspect the service during development.
 	reflection.Register(grpcServer)
 
+	// Periodically purge expired and revoked refresh tokens so they don't pile
+	// up in the database.
+	go startTokenCleanup(ctx, authService)
+
 	log.Printf("gRPC user server listening on %s", gRPCPort)
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server stopped: %v", err)
+	}
+}
+
+const tokenCleanupInterval = 24 * time.Hour
+
+// startTokenCleanup runs a daily ticker that deletes revoked and expired
+// refresh tokens from the database.
+func startTokenCleanup(ctx context.Context, authService *auth.AuthService) {
+	ticker := time.NewTicker(tokenCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			deleted, err := authService.PurgeExpiredTokens(ctx)
+			if err != nil {
+				log.Printf("token cleanup: error purging expired tokens: %v", err)
+			} else if deleted > 0 {
+				log.Printf("token cleanup: purged %d expired/revoked refresh tokens", deleted)
+			}
+		}
 	}
 }
 

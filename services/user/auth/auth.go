@@ -3,7 +3,10 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -151,11 +154,23 @@ func (s *AuthService) Register(ctx context.Context, email, fullName, password, c
 		return AuthResponse{}, err
 	}
 
-	return s.issueTokens(ctx, AuthRequest{
+	authUser := AuthRequest{
 		ID:       user.ID,
 		Email:    user.Email,
 		FullName: user.FullName,
+	}
+
+	res, err := s.issueTokens(ctx, authUser)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
+	_ = s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
+		LastLogin: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		ID:        user.ID,
 	})
+
+	return res, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string) (AuthResponse, error) {
@@ -177,14 +192,29 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (AuthRe
 		return AuthResponse{}, ErrInvalidCredentials
 	}
 
-	return s.issueTokens(ctx, AuthRequest{
+	authUser := AuthRequest{
 		ID:       user.ID,
 		Email:    user.Email,
 		FullName: user.FullName,
+	}
+
+	res, err := s.issueTokens(ctx, authUser)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
+	_ = s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
+		LastLogin: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		ID:        user.ID,
 	})
+
+	return res, nil
 }
 
 // RefreshAccessToken generates a new access token when the existing one has expired.
+// It performs refresh token rotation: the old token is revoked and a new one is
+// issued. If the presented token was already revoked (possible token theft),
+// all of the user's refresh tokens are revoked as a precaution.
 func (s *AuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (AuthResponse, error) {
 	if s.queries == nil {
 		return AuthResponse{}, ErrQueriesRequired
@@ -193,7 +223,8 @@ func (s *AuthService) RefreshAccessToken(ctx context.Context, refreshToken strin
 		return AuthResponse{}, ErrInvalidRefreshToken
 	}
 
-	storedToken, err := s.queries.GetRefreshToken(ctx, refreshToken)
+	// Look up by hash - raw tokens are not stored.
+	storedToken, err := s.queries.GetRefreshToken(ctx, hashToken(refreshToken))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidRefreshToken
 	}
@@ -201,11 +232,18 @@ func (s *AuthService) RefreshAccessToken(ctx context.Context, refreshToken strin
 		return AuthResponse{}, err
 	}
 
+	// Theft detection: if the token was already revoked, someone is replaying
+	// an old token. Revoke ALL tokens for this user so both the attacker and
+	// the legitimate user must re-authenticate.
+	if storedToken.Revoked {
+		log.Printf("auth: potential token theft detected for user_id=%s — revoking all tokens", uuid.UUID(storedToken.UserID.Bytes).String())
+		_ = s.queries.RevokeAllUserRefreshTokens(ctx, storedToken.UserID)
+		return AuthResponse{}, ErrInvalidRefreshToken
+	}
+
 	now := time.Now().UTC()
-	if storedToken.Revoked || !storedToken.ExpiresAt.Valid || !storedToken.ExpiresAt.Time.After(now) {
-		if !storedToken.Revoked {
-			_ = s.queries.RevokeRefreshTokenByID(ctx, storedToken.ID)
-		}
+	if !storedToken.ExpiresAt.Valid || !storedToken.ExpiresAt.Time.After(now) {
+		_ = s.queries.RevokeRefreshTokenByID(ctx, storedToken.ID)
 		return AuthResponse{}, ErrInvalidRefreshToken
 	}
 
@@ -241,6 +279,14 @@ func verifyPassword(hashedPass, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(password))
 }
 
+// hashToken returns the hex-encoded SHA-256 digest of a refresh token.
+// We store the hash in the DB rather than the raw token so that a database
+// compromise does not directly expose usable refresh tokens.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // generateAccessToken creates a new JWT access token.
 func (s *AuthService) generateAccessToken(user AuthRequest, refreshTokenID pgtype.UUID) (string, error) {
 	// Set the expiration time
@@ -270,13 +316,16 @@ func (s *AuthService) generateAccessToken(user AuthRequest, refreshTokenID pgtyp
 
 // issueTokens issues access tokens from generateAccessToken
 // and rotates/creates a new refresh token.
+//
+// The raw refresh token is returned to the caller (for the cookie) while
+// only its SHA-256 hash is persisted in the database.
 func (s *AuthService) issueTokens(ctx context.Context, user AuthRequest) (AuthResponse, error) {
 	now := time.Now().UTC()
 	refreshTokenExpiresAt := now.Add(defaultRefreshTokenTTL)
 	refreshToken := uuid.NewString()
 	storedToken, err := s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
-		Token:     refreshToken,
+		Token:     hashToken(refreshToken),
 		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		ExpiresAt: pgtype.Timestamptz{Time: refreshTokenExpiresAt, Valid: true},
 		Revoked:   false,
@@ -290,13 +339,6 @@ func (s *AuthService) issueTokens(ctx context.Context, user AuthRequest) (AuthRe
 		return AuthResponse{}, err
 	}
 
-	if err := s.queries.UpdateLastLoginStatus(ctx, db.UpdateLastLoginStatusParams{
-		LastLogin: pgtype.Timestamptz{Time: now, Valid: true},
-		ID:        user.ID,
-	}); err != nil {
-		return AuthResponse{}, err
-	}
-
 	return AuthResponse{
 		User:                  user,
 		AccessToken:           accessToken,
@@ -305,10 +347,23 @@ func (s *AuthService) issueTokens(ctx context.Context, user AuthRequest) (AuthRe
 	}, nil
 }
 
-// AuthenticateWithTOTP uses a password-less/TOTP style of authentication.
-//
-// The user provides an email and a Time based One Time Password (TOTP) is sent to the email.
-// If the TOTP is valid and email exists, the user is logged in, else a new user is created.
-// func AuthenticateWithTOTP(email, fullName, totp string,) (string, error) {
+// Logout revokes the provided refresh token, ending the user's session.
+// The caller is responsible for clearing the HttpOnly cookie.
+func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
+	if s.queries == nil {
+		return ErrQueriesRequired
+	}
+	if refreshToken == "" {
+		return ErrInvalidRefreshToken
+	}
+	return s.queries.RevokeRefreshToken(ctx, hashToken(refreshToken))
+}
 
-// }
+// PurgeExpiredTokens deletes all revoked or expired refresh tokens from the
+// database and returns the number of rows removed.
+func (s *AuthService) PurgeExpiredTokens(ctx context.Context) (int64, error) {
+	if s.queries == nil {
+		return 0, ErrQueriesRequired
+	}
+	return s.queries.PurgeExpiredRefreshTokens(ctx)
+}

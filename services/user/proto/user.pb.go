@@ -458,6 +458,86 @@ func (*GetProfileRequest) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{8}
 }
 
+type LogoutRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutRequest) Reset() {
+	*x = LogoutRequest{}
+	mi := &file_user_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutRequest) ProtoMessage() {}
+
+func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_user_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
+func (*LogoutRequest) Descriptor() ([]byte, []int) {
+	return file_user_proto_rawDescGZIP(), []int{9}
+}
+
+type LogoutResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutResponse) Reset() {
+	*x = LogoutResponse{}
+	mi := &file_user_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutResponse) ProtoMessage() {}
+
+func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_user_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutResponse.ProtoReflect.Descriptor instead.
+func (*LogoutResponse) Descriptor() ([]byte, []int) {
+	return file_user_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *LogoutResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -469,7 +549,7 @@ type UserProfile struct {
 
 func (x *UserProfile) Reset() {
 	*x = UserProfile{}
-	mi := &file_user_proto_msgTypes[9]
+	mi := &file_user_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -481,7 +561,7 @@ func (x *UserProfile) String() string {
 func (*UserProfile) ProtoMessage() {}
 
 func (x *UserProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_user_proto_msgTypes[9]
+	mi := &file_user_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -494,7 +574,7 @@ func (x *UserProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfile.ProtoReflect.Descriptor instead.
 func (*UserProfile) Descriptor() ([]byte, []int) {
-	return file_user_proto_rawDescGZIP(), []int{9}
+	return file_user_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UserProfile) GetId() string {
@@ -546,16 +626,20 @@ const file_user_proto_rawDesc = "" +
 	"\fAuthResponse\x12\"\n" +
 	"\x04user\x18\x01 \x01(\v2\x0e.user.AuthUserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\"\x13\n" +
-	"\x11GetProfileRequest\"P\n" +
+	"\x11GetProfileRequest\"\x0f\n" +
+	"\rLogoutRequest\"*\n" +
+	"\x0eLogoutResponse\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"P\n" +
 	"\vUserProfile\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1b\n" +
-	"\tfull_name\x18\x03 \x01(\tR\bfullName2\xf6\x03\n" +
+	"\tfull_name\x18\x03 \x01(\tR\bfullName2\xc7\x04\n" +
 	"\vUserService\x12|\n" +
 	"\x13SendRegistrationOTP\x12 .user.SendRegistrationOTPRequest\x1a!.user.SendRegistrationOTPResponse\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/auth/register/otp\x12S\n" +
 	"\bRegister\x12\x15.user.RegisterRequest\x1a\x12.user.AuthResponse\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/auth/register\x12J\n" +
 	"\x05Login\x12\x12.user.LoginRequest\x1a\x12.user.AuthResponse\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/v1/auth/login\x12t\n" +
-	"\x12RefreshAccessToken\x12\x1f.user.RefreshAccessTokenRequest\x1a .user.RefreshAccessTokenResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/auth/refresh\x12R\n" +
+	"\x12RefreshAccessToken\x12\x1f.user.RefreshAccessTokenRequest\x1a .user.RefreshAccessTokenResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/auth/refresh\x12O\n" +
+	"\x06Logout\x12\x13.user.LogoutRequest\x1a\x14.user.LogoutResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/auth/logout\x12R\n" +
 	"\n" +
 	"GetProfile\x12\x17.user.GetProfileRequest\x1a\x11.user.UserProfile\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/user/profileB:Z8github.com/nduagoziem/homeshr/services/user/proto;authpbb\x06proto3"
 
@@ -571,7 +655,7 @@ func file_user_proto_rawDescGZIP() []byte {
 	return file_user_proto_rawDescData
 }
 
-var file_user_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_user_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_user_proto_goTypes = []any{
 	(*SendRegistrationOTPRequest)(nil),  // 0: user.SendRegistrationOTPRequest
 	(*SendRegistrationOTPResponse)(nil), // 1: user.SendRegistrationOTPResponse
@@ -582,25 +666,29 @@ var file_user_proto_goTypes = []any{
 	(*AuthUser)(nil),                    // 6: user.AuthUser
 	(*AuthResponse)(nil),                // 7: user.AuthResponse
 	(*GetProfileRequest)(nil),           // 8: user.GetProfileRequest
-	(*UserProfile)(nil),                 // 9: user.UserProfile
+	(*LogoutRequest)(nil),               // 9: user.LogoutRequest
+	(*LogoutResponse)(nil),              // 10: user.LogoutResponse
+	(*UserProfile)(nil),                 // 11: user.UserProfile
 }
 var file_user_proto_depIdxs = []int32{
-	6, // 0: user.AuthResponse.user:type_name -> user.AuthUser
-	0, // 1: user.UserService.SendRegistrationOTP:input_type -> user.SendRegistrationOTPRequest
-	2, // 2: user.UserService.Register:input_type -> user.RegisterRequest
-	3, // 3: user.UserService.Login:input_type -> user.LoginRequest
-	4, // 4: user.UserService.RefreshAccessToken:input_type -> user.RefreshAccessTokenRequest
-	8, // 5: user.UserService.GetProfile:input_type -> user.GetProfileRequest
-	1, // 6: user.UserService.SendRegistrationOTP:output_type -> user.SendRegistrationOTPResponse
-	7, // 7: user.UserService.Register:output_type -> user.AuthResponse
-	7, // 8: user.UserService.Login:output_type -> user.AuthResponse
-	5, // 9: user.UserService.RefreshAccessToken:output_type -> user.RefreshAccessTokenResponse
-	9, // 10: user.UserService.GetProfile:output_type -> user.UserProfile
-	6, // [6:11] is the sub-list for method output_type
-	1, // [1:6] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	6,  // 0: user.AuthResponse.user:type_name -> user.AuthUser
+	0,  // 1: user.UserService.SendRegistrationOTP:input_type -> user.SendRegistrationOTPRequest
+	2,  // 2: user.UserService.Register:input_type -> user.RegisterRequest
+	3,  // 3: user.UserService.Login:input_type -> user.LoginRequest
+	4,  // 4: user.UserService.RefreshAccessToken:input_type -> user.RefreshAccessTokenRequest
+	9,  // 5: user.UserService.Logout:input_type -> user.LogoutRequest
+	8,  // 6: user.UserService.GetProfile:input_type -> user.GetProfileRequest
+	1,  // 7: user.UserService.SendRegistrationOTP:output_type -> user.SendRegistrationOTPResponse
+	7,  // 8: user.UserService.Register:output_type -> user.AuthResponse
+	7,  // 9: user.UserService.Login:output_type -> user.AuthResponse
+	5,  // 10: user.UserService.RefreshAccessToken:output_type -> user.RefreshAccessTokenResponse
+	10, // 11: user.UserService.Logout:output_type -> user.LogoutResponse
+	11, // 12: user.UserService.GetProfile:output_type -> user.UserProfile
+	7,  // [7:13] is the sub-list for method output_type
+	1,  // [1:7] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_user_proto_init() }
@@ -614,7 +702,7 @@ func file_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_proto_rawDesc), len(file_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

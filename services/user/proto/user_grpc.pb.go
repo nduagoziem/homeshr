@@ -23,6 +23,7 @@ const (
 	UserService_Register_FullMethodName            = "/user.UserService/Register"
 	UserService_Login_FullMethodName               = "/user.UserService/Login"
 	UserService_RefreshAccessToken_FullMethodName  = "/user.UserService/RefreshAccessToken"
+	UserService_Logout_FullMethodName              = "/user.UserService/Logout"
 	UserService_GetProfile_FullMethodName          = "/user.UserService/GetProfile"
 )
 
@@ -39,6 +40,9 @@ type UserServiceClient interface {
 	// Public: exchanges the HttpOnly refresh_token cookie for a new access token
 	// and rotated refresh_token cookie.
 	RefreshAccessToken(ctx context.Context, in *RefreshAccessTokenRequest, opts ...grpc.CallOption) (*RefreshAccessTokenResponse, error)
+	// Public: revokes the refresh token from the HttpOnly cookie and clears the
+	// cookie, ending the user's session.
+	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	// Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
 	// which forwards the verified identity as x-user-id / x-user-email).
 	GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error)
@@ -92,6 +96,16 @@ func (c *userServiceClient) RefreshAccessToken(ctx context.Context, in *RefreshA
 	return out, nil
 }
 
+func (c *userServiceClient) Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogoutResponse)
+	err := c.cc.Invoke(ctx, UserService_Logout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *userServiceClient) GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*UserProfile, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserProfile)
@@ -115,6 +129,9 @@ type UserServiceServer interface {
 	// Public: exchanges the HttpOnly refresh_token cookie for a new access token
 	// and rotated refresh_token cookie.
 	RefreshAccessToken(context.Context, *RefreshAccessTokenRequest) (*RefreshAccessTokenResponse, error)
+	// Public: revokes the refresh token from the HttpOnly cookie and clears the
+	// cookie, ending the user's session.
+	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	// Protected: requires a valid JWT (enforced by Envoy's jwt_authn filter,
 	// which forwards the verified identity as x-user-id / x-user-email).
 	GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error)
@@ -139,6 +156,9 @@ func (UnimplementedUserServiceServer) Login(context.Context, *LoginRequest) (*Au
 }
 func (UnimplementedUserServiceServer) RefreshAccessToken(context.Context, *RefreshAccessTokenRequest) (*RefreshAccessTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshAccessToken not implemented")
+}
+func (UnimplementedUserServiceServer) Logout(context.Context, *LogoutRequest) (*LogoutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
 }
 func (UnimplementedUserServiceServer) GetProfile(context.Context, *GetProfileRequest) (*UserProfile, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProfile not implemented")
@@ -236,6 +256,24 @@ func _UserService_RefreshAccessToken_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_Logout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).Logout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_Logout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).Logout(ctx, req.(*LogoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_GetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProfileRequest)
 	if err := dec(in); err != nil {
@@ -276,6 +314,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshAccessToken",
 			Handler:    _UserService_RefreshAccessToken_Handler,
+		},
+		{
+			MethodName: "Logout",
+			Handler:    _UserService_Logout_Handler,
 		},
 		{
 			MethodName: "GetProfile",
